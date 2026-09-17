@@ -1,0 +1,503 @@
+import type { DesignChallenge } from '../schema';
+
+/**
+ * Challenges 4–6: governance at scale, hybrid connectivity, and an operations
+ * and cost brief. Same structure as challenges 1–3.
+ */
+export const DESIGN_CHALLENGES_PART_2: DesignChallenge[] = [
+  // --------------------------------------------------------------- challenge 4
+  {
+    id: 'dc-landing-zone',
+    title: 'Governance for a growing estate',
+    company: 'Halcyon Group',
+    brief:
+      'Three business units have been creating Azure subscriptions independently for a year. Nothing is tagged consistently, resources appear in regions the company is not licensed to operate in, and Finance cannot attribute spend. You have been asked to bring it under control without stopping delivery.',
+    difficulty: 2,
+    domains: ['identity-governance'],
+    requirements: [
+      { id: 'r-structure', text: 'Apply company-wide rules once, not per subscription', category: 'governance' },
+      { id: 'r-region', text: 'Resources may only be created in West Europe and North Europe', category: 'governance' },
+      { id: 'r-tags', text: 'Every resource must carry costCentre and owner tags', category: 'governance' },
+      { id: 'r-cost', text: 'Finance must see spend by business unit and be warned before overspend', category: 'cost' },
+      { id: 'r-safe', text: 'Bringing rules in must not break existing deployments on day one', category: 'goal' },
+      { id: 'r-delete', text: 'Production resource groups must be protected from accidental deletion', category: 'failure' },
+    ],
+    constraints: [
+      'The three business units will resist anything that blocks their pipelines without warning.',
+      'There are around 4,000 existing resources, most of them untagged.',
+      'Every subscription is already in the same Microsoft Entra tenant.',
+    ],
+    decisions: [
+      {
+        id: 'd-scope',
+        lens: 'governance',
+        question: 'Where do you assign the company-wide rules?',
+        requirementIds: ['r-structure'],
+        options: [
+          { id: 'o1', label: 'A management group hierarchy, with the baseline assigned at the top', score: 2, feedback: 'Correct. Assign once and every subscription beneath inherits it — including subscriptions created next year.', detail: 'Inherited' },
+          { id: 'o2', label: 'The same assignments on each subscription', score: 0, feedback: 'It works today and drifts immediately. New subscriptions arrive ungoverned, and every change is three changes.', detail: 'Per subscription' },
+          { id: 'o3', label: 'On each production resource group', score: 0, feedback: 'Even more assignments to maintain, and nothing covers resource groups created later.', detail: 'Per group' },
+          { id: 'o4', label: 'A management group per business unit, with rules on each', score: 1, feedback: 'The hierarchy is right and useful for delegation, but company-wide rules still belong at the level above all three.', detail: 'Partial' },
+        ],
+      },
+      {
+        id: 'd-rollout',
+        lens: 'goal',
+        question: 'How do you introduce the rules without breaking delivery?',
+        requirementIds: ['r-safe'],
+        options: [
+          { id: 'o1', label: 'Assign in Audit or DoNotEnforce first, publish the non-compliance report, then switch to Deny on an agreed date', score: 2, feedback: 'Correct. You measure the blast radius, give teams time and evidence, and switch with everyone informed.', detail: 'Measure then enforce' },
+          { id: 'o2', label: 'Assign with Deny immediately — the rules are correct', score: 0, feedback: 'Correct rules applied without warning break pipelines and destroy the goodwill the programme needs.', detail: 'Enforce first' },
+          { id: 'o3', label: 'Assign Deny with exemptions for every existing resource group', score: 1, feedback: 'Defensible as a transition, but exemptions accumulate and rarely get removed. Give them expiry dates if you do this.', detail: 'Enforce with carve-outs' },
+          { id: 'o4', label: 'Send an email asking teams to comply voluntarily', score: 0, feedback: 'Policy exists because this does not work at 4,000 resources.', detail: 'No control' },
+        ],
+      },
+      {
+        id: 'd-tags',
+        lens: 'governance',
+        question: 'How do you get tags onto resources that do not have them?',
+        requirementIds: ['r-tags'],
+        options: [
+          { id: 'o1', label: 'A Modify policy that inherits the tag from the resource group, with a remediation task for existing resources', score: 2, feedback: 'Correct. Modify fixes new resources on creation, and a remediation task applies it retrospectively. It needs a managed identity on the assignment.', detail: 'Modify + remediate' },
+          { id: 'o2', label: 'A Deny policy requiring the tags', score: 1, feedback: 'It stops the problem growing but does nothing about the 4,000 resources already there, and it pushes work onto every team.', detail: 'Deny only' },
+          { id: 'o3', label: 'A script that tags everything once', score: 1, feedback: 'It fixes today and drifts tomorrow. Useful alongside a policy, not instead of one.', detail: 'One-off' },
+          { id: 'o4', label: 'Rely on tag inheritance from the resource group', score: 0, feedback: 'Resources do not inherit tags from their resource group automatically. That is precisely why the Modify policy exists.', detail: 'Misconception' },
+        ],
+      },
+      {
+        id: 'd-cost',
+        lens: 'cost',
+        question: 'How does Finance get spend by business unit, with early warning?',
+        requirementIds: ['r-cost'],
+        options: [
+          { id: 'o1', label: 'Cost analysis grouped by the costCentre tag, plus budgets with alerts at 50, 80 and 100 per cent', score: 2, feedback: 'Correct — and it only works because the tagging policy makes the tag reliable. Budgets alert; they never stop spending.', detail: 'Tags + budgets' },
+          { id: 'o2', label: 'A budget per subscription with a hard spending cap', score: 0, feedback: 'There is no hard cap. A budget raises alerts; stopping anything requires automation triggered by an action group.', detail: 'Misconception' },
+          { id: 'o3', label: 'Monthly manual review of the invoice', score: 0, feedback: 'By the time the invoice arrives the money is spent, and untagged resources cannot be attributed anyway.', detail: 'Retrospective' },
+          { id: 'o4', label: 'One subscription per business unit and cost analysis by subscription', score: 1, feedback: 'A clean billing boundary and often the right structure — but it does not attribute shared subscriptions, and tags are still needed for finer detail.', detail: 'Structural' },
+        ],
+      },
+      {
+        id: 'd-locks',
+        lens: 'failure',
+        question: 'How do you protect production resource groups from deletion?',
+        requirementIds: ['r-delete'],
+        options: [
+          { id: 'o1', label: 'A CanNotDelete lock on each production resource group', score: 2, feedback: 'Correct. It allows normal changes and blocks deletion, and it is inherited by everything inside the group.', detail: 'CanNotDelete' },
+          { id: 'o2', label: 'A ReadOnly lock on each production resource group', score: 0, feedback: 'It blocks all modification too, which stops deployments — and blocks operations that look like reads, such as listing storage account keys.', detail: 'Too restrictive' },
+          { id: 'o3', label: 'Remove Contributor from everyone in production', score: 1, feedback: 'Least privilege is good practice, but someone must still be able to deploy, and they can then still delete.', detail: 'RBAC only' },
+          { id: 'o4', label: 'A Deny policy on delete actions', score: 0, feedback: 'Policy evaluates resource properties on write; resource locks are the mechanism designed for this.', detail: 'Wrong tool' },
+        ],
+      },
+      {
+        id: 'd-regions',
+        lens: 'governance',
+        question: 'How do you enforce the allowed regions?',
+        requirementIds: ['r-region'],
+        options: [
+          { id: 'o1', label: 'The built-in Allowed locations policy, in an initiative with the tagging policy, assigned at the top management group', score: 2, feedback: 'Correct. One initiative carries the whole baseline, is reported on as one thing, and is inherited everywhere.', detail: 'Initiative' },
+          { id: 'o2', label: 'Two separate policy assignments at the top management group', score: 1, feedback: 'Functionally equivalent today, and it gets unmanageable as the baseline grows to dozens of rules.', detail: 'Individual assignments' },
+          { id: 'o3', label: 'RBAC restricting where users can deploy', score: 0, feedback: 'RBAC controls who may act, not what the resulting resource may look like. There is no region dimension in a role assignment.', detail: 'Wrong mechanism' },
+          { id: 'o4', label: 'Review deployments in code review', score: 0, feedback: 'It catches what goes through review and nothing else.', detail: 'Process only' },
+        ],
+      },
+    ],
+    solution: {
+      summary:
+        'A management group hierarchy with a single "Corp baseline" initiative — allowed locations, required tags via Modify with remediation — rolled out in Audit before switching to Deny, CanNotDelete locks on production groups, and budgets reporting on the now-reliable costCentre tag.',
+      diagram: {
+        root: {
+          type: 'group',
+          id: 'tenant',
+          label: 'Halcyon tenant',
+          kind: 'hierarchy',
+          concept: 'entra-tenant',
+          direction: 'col',
+          children: [
+            {
+              type: 'group',
+              id: 'mg-root',
+              label: 'mg-halcyon',
+              sub: 'Corp baseline initiative assigned here',
+              kind: 'hierarchy',
+              concept: 'management-group',
+              direction: 'row',
+              children: [
+                {
+                  type: 'group',
+                  id: 'mg-a',
+                  label: 'mg-logistics',
+                  kind: 'hierarchy',
+                  concept: 'management-group',
+                  direction: 'col',
+                  children: [{ type: 'node', id: 'sub-a', label: 'Subscription', icon: 'subscription', concept: 'subscription' }],
+                },
+                {
+                  type: 'group',
+                  id: 'mg-b',
+                  label: 'mg-retail',
+                  kind: 'hierarchy',
+                  concept: 'management-group',
+                  direction: 'col',
+                  children: [{ type: 'node', id: 'sub-b', label: 'Subscription', icon: 'subscription', concept: 'subscription' }],
+                },
+                {
+                  type: 'group',
+                  id: 'mg-c',
+                  label: 'mg-corporate',
+                  kind: 'hierarchy',
+                  concept: 'management-group',
+                  direction: 'col',
+                  children: [{ type: 'node', id: 'sub-c', label: 'Subscription', sub: 'production RGs locked', icon: 'subscription', concept: 'subscription' }],
+                },
+              ],
+            },
+            { type: 'node', id: 'initiative', label: 'Corp baseline', sub: 'locations + tags', icon: 'policy', tone: 'accent', concept: 'policy-initiative' },
+            { type: 'node', id: 'budget', label: 'Budgets by costCentre', icon: 'cost', concept: 'budget' },
+            { type: 'node', id: 'lock', label: 'CanNotDelete locks', icon: 'lock', tone: 'good', concept: 'resource-lock' },
+          ],
+        },
+        edges: [
+          { from: 'initiative', to: 'mg-root', label: 'assigned at', tone: 'allow' },
+          { from: 'mg-root', to: 'mg-a', label: 'inherits', style: 'dashed', tone: 'muted' },
+          { from: 'mg-root', to: 'mg-b', label: 'inherits', style: 'dashed', tone: 'muted' },
+          { from: 'mg-root', to: 'mg-c', label: 'inherits', style: 'dashed', tone: 'muted' },
+          { from: 'budget', to: 'mg-root', label: 'reports on tags', style: 'dashed', tone: 'data' },
+          { from: 'lock', to: 'sub-c', label: 'protects', style: 'dashed', tone: 'allow' },
+        ],
+      },
+      rationale: [
+        { decision: 'Management group hierarchy', why: 'It is the only scope where a rule assigned once covers subscriptions that do not exist yet.' },
+        { decision: 'Audit before Deny', why: 'The compliance report is the evidence that turns an imposed rule into an agreed date.' },
+        { decision: 'Modify with remediation for tags', why: 'Deny alone leaves 4,000 untagged resources untouched. Modify fixes new and old, and needs a managed identity on the assignment.' },
+        { decision: 'CanNotDelete rather than ReadOnly', why: 'Production must still be deployable. ReadOnly would block the deployments the business units depend on.' },
+        { decision: 'Budgets on the costCentre tag', why: 'Cost attribution is only as good as the tagging, which is why the tag policy comes first.' },
+      ],
+      alternatives: [
+        { option: 'One subscription per business unit', whenBetter: 'When the units need genuinely separate billing and quota boundaries — often combined with, not instead of, the management group hierarchy.' },
+        { option: 'Azure Blueprints or deployment stacks for landing zones', whenBetter: 'When you are provisioning many new subscriptions to a standard shape rather than retrofitting existing ones.' },
+        { option: 'Policy exemptions with expiry dates', whenBetter: 'When a genuine, time-boxed exception exists with a named owner — never as a routine way around the baseline.' },
+      ],
+    },
+    concepts: ['management-group', 'azure-policy', 'policy-initiative', 'policy-effect', 'tags', 'budget', 'resource-lock', 'subscription'],
+    sources: ['management-groups', 'policy-overview', 'policy-effects', 'tags', 'budgets', 'locks'],
+  },
+
+  // --------------------------------------------------------------- challenge 5
+  {
+    id: 'dc-hybrid-network',
+    title: 'Connecting the datacentre',
+    company: 'Ardent Manufacturing',
+    brief:
+      'A factory datacentre must reach Azure workloads privately. Three application teams need their own virtual networks, all of which must reach shared DNS and file services and be inspected by a firewall on the way out to the internet. The network team wants one place to manage connectivity.',
+    difficulty: 3,
+    domains: ['networking', 'identity-governance'],
+    requirements: [
+      { id: 'r-onprem', text: 'The factory datacentre reaches Azure resources over a private connection', category: 'network' },
+      { id: 'r-isolation', text: 'Each application team has its own virtual network', category: 'network' },
+      { id: 'r-shared', text: 'All teams reach shared DNS and file services', category: 'network' },
+      { id: 'r-inspect', text: 'Outbound internet traffic is inspected by a firewall', category: 'security' },
+      { id: 'r-nospoke', text: 'Application networks must not talk to each other directly', category: 'security' },
+      { id: 'r-onegateway', text: 'Only one VPN or ExpressRoute gateway to pay for and manage', category: 'cost' },
+    ],
+    constraints: [
+      'The factory has a single site with an existing MPLS provider who can supply ExpressRoute.',
+      'Address space must be planned centrally; teams have been told to stop picking their own.',
+      'The security team requires all egress through the inspection point.',
+    ],
+    decisions: [
+      {
+        id: 'd-topology',
+        lens: 'network',
+        question: 'What topology do you use?',
+        requirementIds: ['r-isolation', 'r-shared', 'r-onegateway'],
+        options: [
+          { id: 'o1', label: 'Hub and spoke: a hub network holding the gateway, firewall and shared services, with each team’s network peered to it', score: 2, feedback: 'Correct. One gateway, one inspection point, one place to manage connectivity — and each team keeps its own network.', detail: 'Hub and spoke' },
+          { id: 'o2', label: 'One large virtual network with a subnet per team', score: 1, feedback: 'Simpler, and it gives teams no boundary of their own and makes delegated administration awkward.', detail: 'Flat' },
+          { id: 'o3', label: 'Full mesh peering between all four networks', score: 0, feedback: 'Six peerings today, and it grows quadratically. It also gives every team a direct path to every other, which the requirements forbid.', detail: 'Mesh' },
+          { id: 'o4', label: 'A separate gateway in each team’s network', score: 0, feedback: 'Three gateways to pay for and manage, and three inspection points to keep consistent.', detail: 'Per-spoke gateways' },
+        ],
+      },
+      {
+        id: 'd-connection',
+        lens: 'network',
+        question: 'How does the factory connect?',
+        requirementIds: ['r-onprem'],
+        options: [
+          { id: 'o1', label: 'ExpressRoute through the existing MPLS provider, terminating on a gateway in the hub', score: 2, feedback: 'Correct. A private circuit that never touches the public internet, and the provider relationship already exists.', detail: 'Private circuit' },
+          { id: 'o2', label: 'A site-to-site VPN over the internet', score: 1, feedback: 'Encrypted and much cheaper, but it traverses the public internet with internet-grade latency and no bandwidth guarantee. A reasonable interim or backup path.', detail: 'Encrypted tunnel' },
+          { id: 'o3', label: 'Point-to-site VPN from each factory machine', score: 0, feedback: 'Point-to-site is for individual clients, not for connecting a site.', detail: 'Client VPN' },
+          { id: 'o4', label: 'Public endpoints restricted by IP address', score: 0, feedback: 'The requirement is a private connection. IP filtering on public endpoints is not one.', detail: 'Public path' },
+        ],
+      },
+      {
+        id: 'd-transit',
+        lens: 'network',
+        question: 'How do the spokes use the hub’s gateway?',
+        requirementIds: ['r-onprem', 'r-onegateway'],
+        options: [
+          { id: 'o1', label: 'Enable "allow gateway transit" on the hub side of each peering and "use remote gateways" on the spoke side', score: 2, feedback: 'Correct. The two settings are a pair — both must be set, one on each side of the peering.', detail: 'Gateway transit' },
+          { id: 'o2', label: 'Enable "allow gateway transit" on the hub only', score: 0, feedback: 'The spokes must also select "use remote gateways", or they will not learn the on-premises routes.', detail: 'Half configured' },
+          { id: 'o3', label: 'Add user-defined routes on each spoke pointing at the gateway', score: 1, feedback: 'Routes alone do not grant the spokes the right to use another network’s gateway; gateway transit is the mechanism that does.', detail: 'Routes only' },
+          { id: 'o4', label: 'Deploy a gateway in each spoke', score: 0, feedback: 'That is exactly the cost the hub exists to avoid.', detail: 'Per-spoke' },
+        ],
+      },
+      {
+        id: 'd-egress',
+        lens: 'security',
+        question: 'How do you force outbound internet traffic through the firewall?',
+        requirementIds: ['r-inspect'],
+        options: [
+          { id: 'o1', label: 'A user-defined route on each spoke subnet sending 0.0.0.0/0 to the firewall’s private IP as a virtual appliance', score: 2, feedback: 'Correct. A UDR beats the system default route, so all egress is steered to the inspection point.', detail: 'Forced tunnelling' },
+          { id: 'o2', label: 'An NSG rule denying outbound internet traffic', score: 1, feedback: 'It blocks egress rather than inspecting it — useful as a backstop, but it does not deliver inspected internet access.', detail: 'Block, not inspect' },
+          { id: 'o3', label: 'Rely on the system default route', score: 0, feedback: 'The system route sends 0.0.0.0/0 straight to the internet, bypassing the firewall entirely.', detail: 'No control' },
+          { id: 'o4', label: 'Put the firewall in each spoke', score: 0, feedback: 'Three firewalls to license, manage and keep consistent, for one requirement.', detail: 'Per-spoke' },
+        ],
+      },
+      {
+        id: 'd-spoke-spoke',
+        lens: 'security',
+        question: 'The teams ask for spoke-to-spoke connectivity. What do you tell them?',
+        requirementIds: ['r-nospoke'],
+        options: [
+          { id: 'o1', label: 'Peering is not transitive, so it does not happen by default — and the security requirement says it should not', score: 2, feedback: 'Correct on both counts. The absence of spoke-to-spoke routing here is a design decision, not an oversight.', detail: 'By design' },
+          { id: 'o2', label: 'Peer the spokes directly to each other', score: 0, feedback: 'It contradicts the requirement and bypasses the inspection point.', detail: 'Direct peering' },
+          { id: 'o3', label: 'Route spoke-to-spoke traffic through the hub firewall with UDRs', score: 1, feedback: 'The correct technique when the requirement allows inspected spoke-to-spoke traffic. Here it does not — but it is worth knowing.', detail: 'Inspected transit' },
+          { id: 'o4', label: 'Merge the spokes into one virtual network', score: 0, feedback: 'It removes the isolation the design was asked to provide.', detail: 'Flatten' },
+        ],
+      },
+      {
+        id: 'd-dns',
+        lens: 'network',
+        question: 'How do spoke resources resolve private endpoint names?',
+        requirementIds: ['r-shared'],
+        options: [
+          { id: 'o1', label: 'Private DNS zones in the hub, each linked to every virtual network that needs to resolve them', score: 2, feedback: 'Correct. A zone must be linked to the network doing the lookup, so every spoke needs the link — this is the step most often missed.', detail: 'Zone links' },
+          { id: 'o2', label: 'A private DNS zone in each spoke', score: 1, feedback: 'It works and multiplies the number of zones and records to keep consistent.', detail: 'Per-spoke zones' },
+          { id: 'o3', label: 'Hosts file entries on each VM', score: 0, feedback: 'Unmanageable, and broken the moment a machine is rebuilt.', detail: 'Manual' },
+          { id: 'o4', label: 'Rely on Azure-provided DNS with no zone', score: 0, feedback: 'Without the linked zone the name resolves to the public IP, and the private endpoint does nothing.', detail: 'Broken resolution' },
+        ],
+      },
+    ],
+    solution: {
+      summary:
+        'A hub network holding the ExpressRoute gateway, a firewall and shared services, with three spokes peered to it using gateway transit, user-defined routes forcing all egress through the firewall, and private DNS zones in the hub linked to every spoke.',
+      diagram: {
+        root: {
+          type: 'group',
+          id: 'all',
+          label: 'Ardent connectivity',
+          kind: 'plain',
+          direction: 'col',
+          children: [
+            { type: 'node', id: 'factory', label: 'Factory datacentre', icon: 'onprem', concept: 'expressroute' },
+            {
+              type: 'group',
+              id: 'hub',
+              label: 'vnet-hub',
+              sub: '10.0.0.0/16',
+              kind: 'vnet',
+              concept: 'hub-spoke',
+              direction: 'row',
+              children: [
+                { type: 'node', id: 'gw', label: 'GatewaySubnet', sub: 'ExpressRoute gateway', icon: 'gateway', concept: 'expressroute' },
+                { type: 'node', id: 'fw', label: 'Firewall', sub: 'egress inspection', icon: 'firewall', tone: 'accent', concept: 'network-virtual-appliance' },
+                { type: 'node', id: 'dns', label: 'Private DNS zones', icon: 'dns', concept: 'private-dns-zone' },
+              ],
+            },
+            {
+              type: 'group',
+              id: 'spokes',
+              label: 'Application networks',
+              kind: 'plain',
+              direction: 'row',
+              children: [
+                { type: 'node', id: 's1', label: 'vnet-app-a', sub: '10.1.0.0/16', icon: 'vnet', concept: 'vnet' },
+                { type: 'node', id: 's2', label: 'vnet-app-b', sub: '10.2.0.0/16', icon: 'vnet', concept: 'vnet' },
+                { type: 'node', id: 's3', label: 'vnet-app-c', sub: '10.3.0.0/16', icon: 'vnet', concept: 'vnet' },
+              ],
+            },
+            { type: 'node', id: 'net', label: 'Internet', icon: 'internet' },
+          ],
+        },
+        edges: [
+          { from: 'factory', to: 'gw', label: 'ExpressRoute', tone: 'allow' },
+          { from: 's1', to: 'hub', label: 'peering + gateway transit', tone: 'allow', both: true },
+          { from: 's2', to: 'hub', label: 'peering + gateway transit', tone: 'allow', both: true },
+          { from: 's3', to: 'hub', label: 'peering + gateway transit', tone: 'allow', both: true },
+          { from: 'fw', to: 'net', label: 'inspected egress', tone: 'data' },
+          { from: 's1', to: 's2', label: 'no path (by design)', style: 'dashed', tone: 'deny' },
+          { from: 'dns', to: 's1', label: 'zone link', style: 'dashed', tone: 'muted' },
+        ],
+        flows: [{ id: 'egress', label: 'Spoke egress to the internet', path: ['s1', 'hub', 'fw', 'net'], tone: 'data' }],
+      },
+      rationale: [
+        { decision: 'Hub and spoke', why: 'One gateway, one firewall, one DNS estate — and each team still owns a network boundary.' },
+        { decision: 'ExpressRoute over VPN', why: 'A private circuit with predictable bandwidth, using a provider relationship the factory already has.' },
+        { decision: 'Gateway transit on both sides', why: 'It is a paired setting: allow on the hub, use remote gateways on the spoke. Setting only one side is the usual failure.' },
+        { decision: 'UDR for 0.0.0.0/0 to the firewall', why: 'A user-defined route beats the system default route, which is the only way to guarantee egress reaches the inspection point.' },
+        { decision: 'DNS zones linked to every spoke', why: 'A private DNS zone only answers for networks it is linked to. Without the link, private endpoints resolve publicly and fail.' },
+      ],
+      alternatives: [
+        { option: 'Azure Virtual WAN', whenBetter: 'When there are many branch sites and regions — it manages the hubs and routing for you instead of you building them.' },
+        { option: 'Site-to-site VPN as a backup path', whenBetter: 'Almost always worth having alongside ExpressRoute as a failover circuit.' },
+        { option: 'Inspected spoke-to-spoke through the hub firewall', whenBetter: 'When applications genuinely need to talk to each other and the security team wants that traffic inspected rather than forbidden.' },
+      ],
+    },
+    concepts: ['hub-spoke', 'vnet-peering', 'expressroute', 'vpn-gateway', 'route-table', 'network-virtual-appliance', 'private-dns-zone', 'vnet'],
+    sources: ['peering', 'routing', 'private-endpoint-dns', 'vnet-faq'],
+  },
+
+  // --------------------------------------------------------------- challenge 6
+  {
+    id: 'dc-observability',
+    title: 'Finding out before the customer does',
+    company: 'Lumen Health',
+    brief:
+      'A patient-booking platform runs across VMs, App Service and storage. Incidents are currently discovered when clinicians phone the service desk. The board wants proactive detection, a clear audit trail of changes, and the monitoring bill kept sensible.',
+    difficulty: 2,
+    domains: ['monitoring', 'identity-governance'],
+    requirements: [
+      { id: 'r-detect', text: 'Detect degradation before users report it', category: 'monitoring' },
+      { id: 'r-who', text: 'Answer "who changed this and when" for any resource, going back a year', category: 'governance' },
+      { id: 'r-guest', text: 'See memory and disk pressure inside the virtual machines', category: 'monitoring' },
+      { id: 'r-route', text: 'Alerts reach the on-call rotation, not a shared mailbox', category: 'monitoring' },
+      { id: 'r-maint', text: 'Patching windows must not page the on-call engineer', category: 'goal' },
+      { id: 'r-cost', text: 'Keep log ingestion and retention costs proportionate', category: 'cost' },
+    ],
+    constraints: [
+      'Patching runs every Saturday between 22:00 and midnight.',
+      'The regulator requires a year of change history.',
+      'The team is small; they will not maintain dozens of bespoke dashboards.',
+    ],
+    decisions: [
+      {
+        id: 'd-audit',
+        lens: 'governance',
+        question: 'How do you keep a year of change history?',
+        requirementIds: ['r-who'],
+        options: [
+          { id: 'o1', label: 'A diagnostic setting exporting the activity log to a Log Analytics workspace with a year of retention', score: 2, feedback: 'Correct. Azure retains the activity log for only 90 days; exporting it is what creates the audit trail, and workspace retention is configurable.', detail: 'Export + retain' },
+          { id: 'o2', label: 'Nothing — the activity log already keeps a year', score: 0, feedback: 'It keeps 90 days and then deletes. This is the single most testable retention number in Azure Monitor.', detail: 'Misconception' },
+          { id: 'o3', label: 'Export the activity log to a storage account', score: 1, feedback: 'The cheapest way to retain it, and querying it later is far more work than a workspace. Reasonable if the year is purely for archive.', detail: 'Archive' },
+          { id: 'o4', label: 'Export resource logs instead', score: 0, feedback: 'Resource logs record data-plane activity. "Who changed this resource" is control plane — the activity log.', detail: 'Wrong log' },
+        ],
+      },
+      {
+        id: 'd-guest',
+        lens: 'monitoring',
+        question: 'How do you see memory and disk pressure inside the VMs?',
+        requirementIds: ['r-guest'],
+        options: [
+          { id: 'o1', label: 'The Azure Monitor Agent plus a data collection rule associated with the machines', score: 2, feedback: 'Correct — and the rule is the part people forget. Installing the agent alone collects nothing.', detail: 'Agent + DCR' },
+          { id: 'o2', label: 'A diagnostic setting on each virtual machine', score: 0, feedback: 'Diagnostic settings route platform logs and metrics. They cannot see inside the guest operating system.', detail: 'Wrong mechanism' },
+          { id: 'o3', label: 'Platform metrics in Metrics explorer', score: 0, feedback: 'Platform metrics show host-observable values such as CPU. Guest memory and free disk space are not among them.', detail: 'Not available' },
+          { id: 'o4', label: 'Install the Azure Monitor Agent only', score: 1, feedback: 'Half the answer. Without a data collection rule association the agent sits idle — the classic "VM insights is empty" cause.', detail: 'Incomplete' },
+        ],
+      },
+      {
+        id: 'd-alerts',
+        lens: 'monitoring',
+        question: 'What kind of alert rule detects degradation first?',
+        requirementIds: ['r-detect'],
+        options: [
+          { id: 'o1', label: 'Metric alerts on the signals that already exist — response time, failed requests, CPU with max aggregation', score: 2, feedback: 'Correct. Metric alerts are fast, cheap and stateful by default, and the aggregation choice is what makes them fire on real spikes.', detail: 'Metric' },
+          { id: 'o2', label: 'Log search alerts on application logs every five minutes', score: 1, feedback: 'Powerful when the signal only exists in logs, but higher latency and billed by evaluation frequency. Use them where metrics cannot answer.', detail: 'Log search' },
+          { id: 'o3', label: 'Activity log alerts on resource changes', score: 1, feedback: 'Valuable for the audit story, and they detect changes rather than degradation. They are stateless and never auto-resolve.', detail: 'Change detection' },
+          { id: 'o4', label: 'Average CPU over a one-hour window', score: 0, feedback: 'An hour of averaging smooths away exactly the spikes that precede an incident.', detail: 'Wrong aggregation' },
+        ],
+      },
+      {
+        id: 'd-route',
+        lens: 'monitoring',
+        question: 'How do alerts reach the on-call rotation?',
+        requirementIds: ['r-route'],
+        options: [
+          { id: 'o1', label: 'One action group per severity, referenced by every rule, integrated with the paging tool', score: 2, feedback: 'Correct. Changing the rotation becomes one edit rather than one per rule, and severity drives how loudly it escalates.', detail: 'Reusable' },
+          { id: 'o2', label: 'Email addresses configured directly on each alert rule', score: 0, feedback: 'Every rotation change means editing every rule, and one will always be missed.', detail: 'Per rule' },
+          { id: 'o3', label: 'A shared mailbox on one action group', score: 0, feedback: 'The requirement explicitly rules this out, and mailboxes are where alerts go to be ignored.', detail: 'Shared inbox' },
+          { id: 'o4', label: 'An action group per application team', score: 1, feedback: 'Reasonable for ownership, and it still needs a severity dimension to distinguish paging from informational alerts.', detail: 'Per team' },
+        ],
+      },
+      {
+        id: 'd-maint',
+        lens: 'goal',
+        question: 'How do you stop patching windows paging the on-call engineer?',
+        requirementIds: ['r-maint'],
+        options: [
+          { id: 'o1', label: 'An alert processing rule on a weekly schedule that removes all action groups for the affected scope', score: 2, feedback: 'Correct. The rules keep evaluating and the alerts are still recorded — only the notifications are suppressed, and they return automatically.', detail: 'Scheduled suppression' },
+          { id: 'o2', label: 'Disable the alert rules every Saturday evening', score: 0, feedback: 'Manual, easy to forget to reverse, and it loses all coverage during the window.', detail: 'Manual' },
+          { id: 'o3', label: 'Raise the alert thresholds so patching does not trip them', score: 0, feedback: 'It degrades detection permanently to solve a two-hour problem.', detail: 'Blunt' },
+          { id: 'o4', label: 'Tell the on-call engineer to ignore Saturday alerts', score: 0, feedback: 'The one Saturday something real happens, they will.', detail: 'Process only' },
+        ],
+      },
+      {
+        id: 'd-cost',
+        lens: 'cost',
+        question: 'How do you keep the monitoring bill proportionate?',
+        requirementIds: ['r-cost'],
+        options: [
+          { id: 'o1', label: 'Collect deliberately — scope data collection rules to the counters you use, set retention per table, and prefer metric alerts over frequent log queries', score: 2, feedback: 'Correct. Log ingestion and retention are the cost drivers, and log search alerts are billed by evaluation frequency.', detail: 'Deliberate collection' },
+          { id: 'o2', label: 'Collect everything and filter at query time', score: 0, feedback: 'You pay to ingest and retain everything, including the noise nobody queries.', detail: 'Collect all' },
+          { id: 'o3', label: 'Turn off resource logs to save money', score: 0, feedback: 'Resource logs cannot be backfilled. Switching them off saves a little and removes the evidence for the next incident.', detail: 'False economy' },
+          { id: 'o4', label: 'One workspace per resource to isolate costs', score: 1, feedback: 'It makes costs visible per resource and makes cross-resource correlation — the whole point of a workspace — much harder.', detail: 'Fragmented' },
+        ],
+      },
+    ],
+    solution: {
+      summary:
+        'One Log Analytics workspace receiving the exported activity log with a year of retention and scoped guest data from the Azure Monitor Agent, metric alerts on the signals that already exist, severity-based action groups feeding the paging tool, and a scheduled alert processing rule covering the Saturday patching window.',
+      diagram: {
+        root: {
+          type: 'group',
+          id: 'sub',
+          label: 'Lumen Health subscription',
+          kind: 'subscription',
+          direction: 'col',
+          children: [
+            {
+              type: 'group',
+              id: 'workloads',
+              label: 'Workloads',
+              kind: 'plain',
+              direction: 'row',
+              children: [
+                { type: 'node', id: 'vm', label: 'VMs', sub: 'Azure Monitor Agent + DCR', icon: 'vm', concept: 'azure-monitor-agent' },
+                { type: 'node', id: 'app', label: 'App Service', icon: 'app-service', concept: 'app-service' },
+                { type: 'node', id: 'sa', label: 'Storage', icon: 'storage', concept: 'storage-account' },
+              ],
+            },
+            { type: 'node', id: 'activity', label: 'Activity log', sub: '90 days by default', icon: 'monitor', concept: 'activity-log' },
+            { type: 'node', id: 'law', label: 'Log Analytics workspace', sub: '1 year retention', icon: 'log-analytics', tone: 'accent', concept: 'log-analytics-workspace' },
+            { type: 'node', id: 'rules', label: 'Metric + log alert rules', icon: 'alert', concept: 'alert-rule' },
+            { type: 'node', id: 'ag', label: 'Action groups by severity', icon: 'alert', tone: 'good', concept: 'action-group' },
+            { type: 'node', id: 'apr', label: 'Alert processing rule', sub: 'Sat 22:00–00:00', icon: 'shield', concept: 'alert-processing-rule' },
+          ],
+        },
+        edges: [
+          { from: 'vm', to: 'law', label: 'guest logs + metrics', tone: 'data' },
+          { from: 'app', to: 'law', label: 'resource logs', tone: 'data' },
+          { from: 'sa', to: 'law', label: 'resource logs', tone: 'data' },
+          { from: 'activity', to: 'law', label: 'diagnostic setting', tone: 'data' },
+          { from: 'law', to: 'rules', label: 'log alerts', style: 'dashed', tone: 'muted' },
+          { from: 'rules', to: 'ag', label: 'fires', tone: 'allow' },
+          { from: 'apr', to: 'ag', label: 'suppresses during patching', style: 'dashed', tone: 'deny' },
+        ],
+        flows: [{ id: 'signal', label: 'Signal to on-call', path: ['vm', 'law', 'rules', 'ag'], tone: 'data' }],
+      },
+      rationale: [
+        { decision: 'Export the activity log', why: 'Azure keeps it 90 days. A regulatory requirement for a year is only met by exporting it somewhere with configurable retention.' },
+        { decision: 'Azure Monitor Agent with a scoped data collection rule', why: 'Guest memory and disk are invisible without an agent — and the rule both enables collection and limits what you pay to ingest.' },
+        { decision: 'Metric alerts first', why: 'They are cheap, fast and stateful. Log search alerts are reserved for signals metrics cannot express, because they are billed by evaluation frequency.' },
+        { decision: 'Action groups by severity', why: 'Rotation changes become a single edit, and severity is what decides whether something pages or waits until Monday.' },
+        { decision: 'Scheduled alert processing rule', why: 'It suppresses notifications without disabling detection, and it reverses itself automatically.' },
+      ],
+      alternatives: [
+        { option: 'Application Insights for the booking application', whenBetter: 'When you need request-level tracing, dependency maps and smart detection for the application itself rather than the infrastructure under it.' },
+        { option: 'A storage account for the year of activity log', whenBetter: 'When the year is purely an archive obligation and nobody expects to query it interactively.' },
+        { option: 'Azure Monitor baseline alerts deployed by policy', whenBetter: 'When the estate is large enough that hand-maintaining alert rules stops scaling.' },
+      ],
+    },
+    concepts: ['azure-monitor', 'activity-log', 'diagnostic-settings', 'log-analytics-workspace', 'azure-monitor-agent', 'alert-rule', 'action-group', 'alert-processing-rule', 'metrics'],
+    sources: ['activity-log', 'diagnostic-settings', 'ama-overview', 'alerts-overview', 'alerts-types', 'alert-processing-rules', 'metrics-overview'],
+  },
+];

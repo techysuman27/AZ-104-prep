@@ -1,0 +1,525 @@
+import type { DesignChallenge } from '../schema';
+
+/**
+ * Solution Design Lab. Each challenge gives requirements and constraints, then
+ * asks a sequence of decisions through the administrator lenses. Options are
+ * scored 2 (best), 1 (defensible) or 0 (wrong) — because real design rarely has
+ * exactly one acceptable answer, but it always has better and worse ones.
+ */
+export const DESIGN_CHALLENGES_LIST: DesignChallenge[] = [
+  // --------------------------------------------------------------- challenge 1
+  {
+    id: 'dc-internal-portal',
+    title: 'An internal HR portal',
+    company: 'Northwind Logistics',
+    brief:
+      'HR needs a web portal for 400 employees. It reads from an existing Azure SQL database, must never be reachable from the public internet, and the HR team has no server administrators. Traffic is predictable: busy at month end, quiet otherwise.',
+    difficulty: 1,
+    domains: ['compute', 'networking', 'identity-governance'],
+    requirements: [
+      { id: 'r-host', text: 'Host a .NET web application with no servers to patch', category: 'service' },
+      { id: 'r-private', text: 'The portal must not be reachable from the public internet', category: 'network' },
+      { id: 'r-db', text: 'The portal must reach an Azure SQL database that only accepts traffic from the corporate virtual network', category: 'network' },
+      { id: 'r-secrets', text: 'No database credentials may be stored in application configuration', category: 'security' },
+      { id: 'r-release', text: 'Releases must not cause downtime for users', category: 'goal' },
+      { id: 'r-cost', text: 'Keep cost proportionate — this is an internal tool, not a public product', category: 'cost' },
+    ],
+    constraints: [
+      'The HR team has no operations staff; anything requiring OS patching is out.',
+      'The corporate network already reaches Azure over ExpressRoute.',
+      'Security policy requires no public endpoints on internal applications.',
+    ],
+    decisions: [
+      {
+        id: 'd-service',
+        lens: 'service',
+        question: 'Which compute service should host the portal?',
+        context: 'A standard .NET web application with no unusual OS requirements.',
+        requirementIds: ['r-host', 'r-cost'],
+        options: [
+          { id: 'o1', label: 'Azure App Service on a Standard plan', score: 2, feedback: 'Correct. No OS to patch, and Standard is the first tier with deployment slots and autoscale — both of which this design needs.', detail: 'PaaS web hosting' },
+          { id: 'o2', label: 'A virtual machine running IIS', score: 0, feedback: 'The team has no server administrators, and nothing here needs OS-level control. This adds patching, availability and scaling work for no benefit.', detail: 'IaaS' },
+          { id: 'o3', label: 'Azure Container Apps', score: 1, feedback: 'Defensible if the app were already containerised, but it is not — and scale to zero is not a requirement here.', detail: 'Serverless containers' },
+          { id: 'o4', label: 'App Service on a Free (F1) plan', score: 0, feedback: 'Free cannot host a custom domain, cannot scale out, and has no slots. It is for experiments.', detail: 'Shared compute' },
+        ],
+      },
+      {
+        id: 'd-inbound',
+        lens: 'network',
+        question: 'How do you stop the portal being reachable from the internet?',
+        requirementIds: ['r-private'],
+        options: [
+          { id: 'o1', label: 'A private endpoint on the app, with the private DNS zone linked to the virtual network', score: 2, feedback: 'Correct. The app gets a private IP in your network, public access is disabled, and the ExpressRoute connection reaches it. The DNS zone link is what makes the name resolve correctly.', detail: 'Inbound, Private Link' },
+          { id: 'o2', label: 'Access restrictions allowing only the corporate IP ranges', score: 1, feedback: 'Defensible and simple, but the app still has a public endpoint that merely filters by source address. The policy says no public endpoints.', detail: 'Inbound, IP filtering' },
+          { id: 'o3', label: 'Virtual network integration', score: 0, feedback: 'VNet integration is an **outbound** feature. It does nothing to control who can reach the app.', detail: 'Outbound' },
+          { id: 'o4', label: 'A network security group on the App Service plan', score: 0, feedback: 'NSGs apply to subnets and NICs. An App Service app in the multitenant service has neither.', detail: 'Not applicable' },
+        ],
+      },
+      {
+        id: 'd-outbound',
+        lens: 'network',
+        question: 'How does the app reach the SQL database inside the virtual network?',
+        requirementIds: ['r-db'],
+        options: [
+          { id: 'o1', label: 'Virtual network integration, placing the app’s back end in a delegated subnet', score: 2, feedback: 'Correct. This is the outbound feature: the app can now reach resources in the network, including a database protected by a service endpoint or private endpoint.', detail: 'Outbound' },
+          { id: 'o2', label: 'Allow-list the app’s outbound IP addresses on the SQL firewall', score: 0, feedback: 'Those addresses are shared with other apps on the same worker VM family and change when you scale between families. It is fragile and not private.', detail: 'Public path' },
+          { id: 'o3', label: 'Hybrid Connections to the database server', score: 0, feedback: 'Hybrid Connections is for a host in a private network **not** connected to Azure. This database is already in the virtual network.', detail: 'Outbound, relay' },
+          { id: 'o4', label: 'A second private endpoint, on the app', score: 0, feedback: 'A private endpoint on the app is inbound. It does not change what the app can reach.', detail: 'Inbound' },
+        ],
+      },
+      {
+        id: 'd-secrets',
+        lens: 'security',
+        question: 'How does the app authenticate to the database?',
+        requirementIds: ['r-secrets'],
+        options: [
+          { id: 'o1', label: 'A system-assigned managed identity, granted access on the database', score: 2, feedback: 'Correct. There is no credential to store, rotate or leak — the platform issues tokens to the identity.', detail: 'No stored credential' },
+          { id: 'o2', label: 'A connection string in app settings, marked as a deployment slot setting', score: 1, feedback: 'Slot settings correctly stop the staging connection string reaching production, but a credential is still stored in configuration — which the requirement forbids.', detail: 'Stored credential' },
+          { id: 'o3', label: 'A service principal with a client secret in Key Vault', score: 1, feedback: 'Better than plain configuration, but you now own secret rotation. A managed identity removes the secret entirely.', detail: 'Stored credential, vaulted' },
+          { id: 'o4', label: 'The SQL administrator account, shared by the team', score: 0, feedback: 'A shared privileged credential with no rotation and no attribution.', detail: 'Shared credential' },
+        ],
+      },
+      {
+        id: 'd-release',
+        lens: 'goal',
+        question: 'How do you release new versions without downtime?',
+        requirementIds: ['r-release'],
+        options: [
+          { id: 'o1', label: 'A staging deployment slot, swapped into production with production as the target', score: 2, feedback: 'Correct. Every instance is warmed before routing changes, and swapping again is an instant rollback.', detail: 'Slots' },
+          { id: 'o2', label: 'Deploy directly to production outside business hours', score: 0, feedback: 'It still means a cold start and an outage, and rollback means another deployment.', detail: 'Direct deploy' },
+          { id: 'o3', label: 'Run two App Service plans behind Traffic Manager', score: 1, feedback: 'It works, and it doubles the cost of an internal tool to solve a problem slots already solve.', detail: 'Blue-green at plan level' },
+          { id: 'o4', label: 'Scale out to more instances before deploying', score: 0, feedback: 'All instances receive the same deployment; more of them does not remove the restart.', detail: 'Scale out' },
+        ],
+      },
+      {
+        id: 'd-cost',
+        lens: 'cost',
+        question: 'How do you handle the month-end peak?',
+        requirementIds: ['r-cost'],
+        options: [
+          { id: 'o1', label: 'Autoscale rules on the plan with a low minimum and a capped maximum', score: 2, feedback: 'Correct. You pay for the baseline most of the month and only add instances when the metric says so. Leave a clear gap between the thresholds.', detail: 'Scale out on demand' },
+          { id: 'o2', label: 'Size the plan permanently for the peak', score: 0, feedback: 'You pay peak prices for the 27 quiet days of every month.', detail: 'Static' },
+          { id: 'o3', label: 'Scale up to Premium v3 permanently', score: 1, feedback: 'Premium v3 has better price-performance and more features, but sizing permanently for the peak is still the wrong shape for a spiky internal tool.', detail: 'Scale up' },
+          { id: 'o4', label: 'Let requests queue at month end', score: 0, feedback: 'The requirement is a working portal; 400 people waiting is not proportionate cost control.', detail: 'Do nothing' },
+        ],
+      },
+    ],
+    solution: {
+      summary:
+        'App Service on a Standard plan with a staging slot, made private with a private endpoint and a linked private DNS zone, reaching the database through virtual network integration and authenticating with a managed identity. Autoscale handles the month-end peak.',
+      diagram: {
+        root: {
+          type: 'group',
+          id: 'region',
+          label: 'West Europe',
+          kind: 'region',
+          direction: 'col',
+          children: [
+            {
+              type: 'group',
+              id: 'vnet',
+              label: 'vnet-corp',
+              sub: '10.0.0.0/16 · reached over ExpressRoute',
+              kind: 'vnet',
+              concept: 'vnet',
+              direction: 'row',
+              children: [
+                {
+                  type: 'group',
+                  id: 'snet-pe',
+                  label: 'snet-endpoints',
+                  kind: 'subnet',
+                  concept: 'subnet',
+                  direction: 'col',
+                  children: [{ type: 'node', id: 'pe', label: 'Private endpoint', sub: 'portal', icon: 'private-endpoint', tone: 'good', concept: 'private-endpoint' }],
+                },
+                {
+                  type: 'group',
+                  id: 'snet-int',
+                  label: 'snet-appsvc-integration',
+                  sub: 'delegated',
+                  kind: 'subnet',
+                  concept: 'vnet-integration',
+                  direction: 'col',
+                  children: [{ type: 'node', id: 'int', label: 'VNet integration', icon: 'nic', concept: 'vnet-integration' }],
+                },
+                {
+                  type: 'group',
+                  id: 'snet-data',
+                  label: 'snet-data',
+                  kind: 'subnet',
+                  concept: 'subnet',
+                  direction: 'col',
+                  children: [{ type: 'node', id: 'sql', label: 'Azure SQL', sub: 'private only', icon: 'database', concept: 'private-endpoint' }],
+                },
+              ],
+            },
+            {
+              type: 'group',
+              id: 'plan',
+              label: 'plan-hr (Standard S1)',
+              kind: 'boundary',
+              concept: 'app-service-plan',
+              direction: 'row',
+              children: [
+                { type: 'node', id: 'app', label: 'app-hr-portal', sub: 'production', icon: 'app-service', tone: 'accent', concept: 'app-service' },
+                { type: 'node', id: 'slot', label: 'staging slot', icon: 'app-service', tone: 'muted', concept: 'deployment-slot' },
+              ],
+            },
+            { type: 'node', id: 'mi', label: 'Managed identity', icon: 'identity', tone: 'good', concept: 'managed-identity' },
+            { type: 'node', id: 'dns', label: 'privatelink DNS zone', sub: 'linked to vnet-corp', icon: 'dns', concept: 'private-dns-zone' },
+          ],
+        },
+        edges: [
+          { from: 'pe', to: 'app', label: 'inbound', tone: 'allow' },
+          { from: 'app', to: 'int', label: 'outbound', tone: 'data' },
+          { from: 'int', to: 'sql', label: 'private', tone: 'data' },
+          { from: 'app', to: 'mi', label: 'token', style: 'dashed', tone: 'muted' },
+          { from: 'mi', to: 'sql', label: 'authenticates', style: 'dashed', tone: 'allow' },
+          { from: 'dns', to: 'pe', label: 'resolves', style: 'dashed', tone: 'muted' },
+          { from: 'slot', to: 'app', label: 'swap', style: 'dashed', tone: 'muted' },
+        ],
+        flows: [{ id: 'user', label: 'Employee request', path: ['pe', 'app', 'int', 'sql'], tone: 'data' }],
+      },
+      rationale: [
+        { decision: 'App Service on Standard', why: 'No OS to patch, and Standard is the cheapest tier that provides deployment slots and autoscale — both of which are requirements here.' },
+        { decision: 'Private endpoint plus linked DNS zone', why: 'Removes the public endpoint entirely. The DNS link is not optional: without it, clients resolve the public address and fail.' },
+        { decision: 'VNet integration for the database path', why: 'Inbound features cannot solve outbound problems. Integration also removes any dependence on the app’s shared outbound IP addresses.' },
+        { decision: 'Managed identity', why: 'Satisfies the no-stored-credentials requirement outright, rather than moving the secret somewhere better.' },
+        { decision: 'Autoscale with a low minimum', why: 'Matches cost to the actual traffic shape: quiet most of the month, busy at month end.' },
+      ],
+      alternatives: [
+        { option: 'Access restrictions instead of a private endpoint', whenBetter: 'When a public endpoint is acceptable and the source ranges are small and stable — simpler and cheaper, but it does not satisfy a no-public-endpoints policy.' },
+        { option: 'An App Service Environment', whenBetter: 'When the organisation requires single-tenant hosting inside its own virtual network, and the cost of an ASE is justified by more than one workload.' },
+        { option: 'Container Apps', whenBetter: 'When the application is already containerised and would benefit from revisions and scale to zero.' },
+      ],
+    },
+    concepts: ['app-service', 'app-service-plan', 'deployment-slot', 'private-endpoint', 'private-dns-zone', 'vnet-integration', 'managed-identity', 'autoscale'],
+    sources: ['appservice-plans', 'appservice-networking', 'appservice-slots', 'private-endpoint-dns', 'managed-identities'],
+  },
+
+  // --------------------------------------------------------------- challenge 2
+  {
+    id: 'dc-file-archive',
+    title: 'Seven years of invoices',
+    company: 'Meridian Freight',
+    brief:
+      'Finance must retain scanned invoices for seven years to satisfy an audit obligation. Roughly 40 GB arrives each month. Invoices are read frequently in the first month, occasionally in the first year, and almost never afterwards — but an auditor can request any of them with 24 hours’ notice.',
+    difficulty: 2,
+    domains: ['storage', 'identity-governance', 'monitoring'],
+    requirements: [
+      { id: 'r-retain', text: 'Retain every invoice for seven years', category: 'backup' },
+      { id: 'r-cost', text: 'Minimise storage cost across the retention period', category: 'cost' },
+      { id: 'r-access', text: 'Any invoice must be retrievable within 24 hours of a request', category: 'goal' },
+      { id: 'r-delete', text: 'Accidental or malicious deletion must be recoverable', category: 'failure' },
+      { id: 'r-partner', text: 'The scanning provider must be able to upload, but not read or delete', category: 'access' },
+      { id: 'r-audit', text: 'Prove to the auditor who accessed which invoice', category: 'monitoring' },
+    ],
+    constraints: [
+      'The auditor accepts a 24-hour retrieval window but not longer.',
+      'The scanning provider is a third party with no Entra identity in the tenant.',
+      'Finance has no Azure expertise and will not run a monthly tiering job by hand.',
+    ],
+    decisions: [
+      {
+        id: 'd-tiering',
+        lens: 'cost',
+        question: 'How should invoices move between access tiers over seven years?',
+        requirementIds: ['r-cost', 'r-access'],
+        options: [
+          { id: 'o1', label: 'A lifecycle management policy: Cool after 30 days, Archive after 180, delete after 2,555 days', score: 2, feedback: 'Correct. It runs automatically, respects the minimum retention periods of each tier, and Archive rehydration fits inside a 24-hour window.', detail: 'Automated' },
+          { id: 'o2', label: 'Leave everything in Hot', score: 0, feedback: 'Simple and correct for retrieval, and the most expensive possible answer for data that is almost never read after a year.', detail: 'No tiering' },
+          { id: 'o3', label: 'Move everything to Archive immediately on upload', score: 0, feedback: 'The first month of frequent reads would mean constant rehydration, and moving out of Archive before 180 days incurs an early-deletion charge.', detail: 'Archive only' },
+          { id: 'o4', label: 'A monthly script that re-tiers blobs by age', score: 1, feedback: 'It achieves the same result while adding an operational job to maintain — and Finance has said they will not run one.', detail: 'Manual automation' },
+        ],
+      },
+      {
+        id: 'd-retrieval',
+        lens: 'goal',
+        question: 'Does Archive satisfy the 24-hour retrieval requirement?',
+        requirementIds: ['r-access'],
+        options: [
+          { id: 'o1', label: 'Yes — rehydrate to Hot or Cool on request; standard priority completes well within 24 hours', score: 2, feedback: 'Correct. Archive is offline: the blob must be rehydrated before it can be read, and the requirement was written with that in mind.', detail: 'Rehydration' },
+          { id: 'o2', label: 'Yes — Archive blobs can be read directly with a slightly higher latency', score: 0, feedback: 'They cannot. Archive is offline storage; a read attempt fails until the blob is rehydrated.', detail: 'Misconception' },
+          { id: 'o3', label: 'No — use Cool as the coldest tier instead', score: 1, feedback: 'A defensible, more expensive choice that removes rehydration entirely. Justified only if the retrieval window were hours rather than a day.', detail: 'Cool floor' },
+          { id: 'o4', label: 'No — keep a duplicate copy in Hot for auditors', score: 0, feedback: 'Doubles the cost of the whole archive to serve a rare request.', detail: 'Duplicate' },
+        ],
+      },
+      {
+        id: 'd-protect',
+        lens: 'failure',
+        question: 'How do you make deletion recoverable?',
+        requirementIds: ['r-delete'],
+        options: [
+          { id: 'o1', label: 'Blob soft delete and container soft delete, plus versioning', score: 2, feedback: 'Correct. Soft delete recovers deleted blobs and containers; versioning recovers overwrites. They solve different problems and you need both.', detail: 'Data protection' },
+          { id: 'o2', label: 'Blob soft delete only', score: 1, feedback: 'It recovers deletions but not an overwrite, and it does not cover a deleted container.', detail: 'Partial' },
+          { id: 'o3', label: 'Geo-redundant storage', score: 0, feedback: 'GRS replicates a deletion to the secondary region faithfully. It protects against losing the region, not against losing the data.', detail: 'Wrong failure mode' },
+          { id: 'o4', label: 'A resource lock on the storage account', score: 1, feedback: 'A CanNotDelete lock stops the **account** being deleted, which is worth having — but it does nothing about individual blobs.', detail: 'Different scope' },
+        ],
+      },
+      {
+        id: 'd-partner',
+        lens: 'access',
+        question: 'How does the scanning provider upload without being able to read or delete?',
+        requirementIds: ['r-partner'],
+        options: [
+          { id: 'o1', label: 'A SAS with create and write permissions only, bound to a stored access policy', score: 2, feedback: 'Correct. Narrow permissions, a defined expiry, and — because of the stored access policy — revocable without rotating the account key.', detail: 'Scoped, revocable' },
+          { id: 'o2', label: 'A SAS with full permissions and a short expiry', score: 0, feedback: 'Read and delete were explicitly excluded by the requirement. A short expiry does not make over-permission acceptable.', detail: 'Over-permissioned' },
+          { id: 'o3', label: 'The storage account key', score: 0, feedback: 'Full control of the entire account, no expiry, no scope, no attribution.', detail: 'Shared credential' },
+          { id: 'o4', label: 'A guest user with the Storage Blob Data Contributor role', score: 1, feedback: 'Defensible and auditable if the provider can accept a B2B identity — but Contributor includes delete, so a narrower role would be needed.', detail: 'Identity-based' },
+        ],
+      },
+      {
+        id: 'd-audit',
+        lens: 'monitoring',
+        question: 'How do you prove who read which invoice?',
+        requirementIds: ['r-audit'],
+        options: [
+          { id: 'o1', label: 'A diagnostic setting sending StorageRead resource logs to a Log Analytics workspace', score: 2, feedback: 'Correct. Reads are data-plane operations, so only resource logs record them — and they must be enabled before the access you want to audit.', detail: 'Resource logs' },
+          { id: 'o2', label: 'The activity log', score: 0, feedback: 'The activity log records control-plane operations and does not typically capture reads.', detail: 'Control plane' },
+          { id: 'o3', label: 'Storage metrics', score: 0, feedback: 'Metrics give you transaction counts, not who read which blob.', detail: 'Aggregates' },
+          { id: 'o4', label: 'Enable it when the auditor asks', score: 0, feedback: 'Resource logs cannot be backfilled. Enabling them later records nothing about the past.', detail: 'Too late' },
+        ],
+      },
+      {
+        id: 'd-redundancy',
+        lens: 'failure',
+        question: 'Which storage redundancy fits a seven-year legal obligation?',
+        requirementIds: ['r-retain'],
+        options: [
+          { id: 'o1', label: 'GRS — replicated to the paired region', score: 2, feedback: 'Correct for data the business is legally required to still hold in seven years. Regional loss is the failure that ends the obligation.', detail: 'Cross-region' },
+          { id: 'o2', label: 'ZRS — across zones in one region', score: 1, feedback: 'Survives losing a datacentre and is cheaper, but not the loss of the region. Defensible if the obligation tolerates that risk.', detail: 'Cross-zone' },
+          { id: 'o3', label: 'LRS — three copies in one datacentre', score: 0, feedback: 'The cheapest option and the weakest: it does not survive losing the datacentre, let alone the region.', detail: 'Single datacentre' },
+          { id: 'o4', label: 'RA-GRS', score: 1, feedback: 'GRS plus readable secondary. Worth it if you want to read the replica routinely; otherwise it is paying for a capability this design does not use.', detail: 'Cross-region, readable' },
+        ],
+      },
+    ],
+    solution: {
+      summary:
+        'A GRS storage account with soft delete and versioning on, a lifecycle policy tiering Hot → Cool → Archive and deleting at seven years, upload access via a SAS bound to a stored access policy, and read logs routed to a Log Analytics workspace from day one.',
+      diagram: {
+        root: {
+          type: 'group',
+          id: 'sub',
+          label: 'Subscription',
+          kind: 'subscription',
+          direction: 'col',
+          children: [
+            {
+              type: 'group',
+              id: 'sa',
+              label: 'stinvoicearchive (GRS)',
+              kind: 'boundary',
+              concept: 'storage-account',
+              direction: 'row',
+              children: [
+                { type: 'node', id: 'hot', label: 'Hot', sub: '0–30 days', icon: 'blob', tone: 'accent', concept: 'access-tier' },
+                { type: 'node', id: 'cool', label: 'Cool', sub: '30–180 days', icon: 'blob', concept: 'access-tier' },
+                { type: 'node', id: 'archive', label: 'Archive', sub: '180 days – 7 years', icon: 'blob', tone: 'muted', concept: 'access-tier' },
+              ],
+            },
+            { type: 'node', id: 'lifecycle', label: 'Lifecycle policy', icon: 'policy', concept: 'lifecycle-management' },
+            { type: 'node', id: 'protect', label: 'Soft delete + versioning', icon: 'shield', tone: 'good', concept: 'blob-soft-delete' },
+            { type: 'node', id: 'sas', label: 'SAS + stored access policy', sub: 'create, write', icon: 'key-vault', concept: 'stored-access-policy' },
+            { type: 'node', id: 'scanner', label: 'Scanning provider', icon: 'laptop', concept: 'sas' },
+            { type: 'node', id: 'law', label: 'Log Analytics', sub: 'StorageRead logs', icon: 'log-analytics', concept: 'log-analytics-workspace' },
+            { type: 'node', id: 'pair', label: 'Paired region replica', icon: 'globe', tone: 'muted', concept: 'paired-region' },
+          ],
+        },
+        edges: [
+          { from: 'scanner', to: 'sas', label: 'presents', style: 'dashed', tone: 'muted' },
+          { from: 'sas', to: 'hot', label: 'upload', tone: 'data' },
+          { from: 'lifecycle', to: 'cool', label: 'after 30 days', style: 'dashed', tone: 'muted' },
+          { from: 'lifecycle', to: 'archive', label: 'after 180 days', style: 'dashed', tone: 'muted' },
+          { from: 'protect', to: 'sa', label: 'recoverable', style: 'dashed', tone: 'allow' },
+          { from: 'sa', to: 'law', label: 'resource logs', tone: 'data' },
+          { from: 'sa', to: 'pair', label: 'geo-replication', style: 'dashed', tone: 'muted' },
+        ],
+        flows: [{ id: 'upload', label: 'Nightly invoice upload', path: ['scanner', 'sas', 'hot'], tone: 'data' }],
+      },
+      rationale: [
+        { decision: 'Lifecycle policy rather than a script', why: 'It runs on the platform, respects the minimum retention periods of each tier, and needs no operational owner.' },
+        { decision: 'Archive as the coldest tier', why: 'The 24-hour retrieval requirement was written to accommodate rehydration. Anything warmer pays for availability nobody uses.' },
+        { decision: 'Soft delete and versioning together', why: 'They cover different failure modes — deletion and overwrite — and neither is on by default.' },
+        { decision: 'SAS bound to a stored access policy', why: 'Create-and-write only satisfies least privilege, and the policy makes revocation possible without rotating the account key and breaking everything else.' },
+        { decision: 'Resource logs from day one', why: 'Read operations are data-plane. If logging is not enabled before the access happens, the evidence does not exist.' },
+      ],
+      alternatives: [
+        { option: 'Cool as the coldest tier', whenBetter: 'When retrieval must be immediate rather than within 24 hours — higher storage cost, no rehydration delay.' },
+        { option: 'An immutability policy (WORM)', whenBetter: 'When the regulator requires that nobody, including an administrator, can alter or delete records before the retention expires.' },
+        { option: 'A B2B guest identity for the scanning provider', whenBetter: 'When the provider can accept an Entra identity — it gives per-user attribution in the logs that a shared SAS cannot.' },
+      ],
+    },
+    concepts: ['storage-account', 'access-tier', 'lifecycle-management', 'blob-soft-delete', 'blob-versioning', 'sas', 'stored-access-policy', 'storage-redundancy', 'diagnostic-settings'],
+    sources: ['storage-account-overview', 'access-tiers', 'lifecycle', 'blob-soft-delete', 'sas-overview', 'stored-access-policy', 'storage-redundancy', 'diagnostic-settings'],
+  },
+
+  // --------------------------------------------------------------- challenge 3
+  {
+    id: 'dc-resilient-web',
+    title: 'A public website that must stay up',
+    company: 'Coastal Retail',
+    brief:
+      'A customer-facing product catalogue runs on virtual machines because it depends on a licensed component that must be installed at the OS level. It must survive the loss of a datacentre, handle a five-fold traffic increase during promotions, and be recoverable if a region is lost.',
+    difficulty: 3,
+    domains: ['compute', 'networking', 'monitoring'],
+    requirements: [
+      { id: 'r-os', text: 'The licensed component requires OS-level installation', category: 'service' },
+      { id: 'r-zone', text: 'Survive the loss of a single datacentre with no manual intervention', category: 'failure' },
+      { id: 'r-scale', text: 'Handle a five-fold traffic increase during promotions', category: 'goal' },
+      { id: 'r-region', text: 'Recover in another region if the primary region is lost, within one hour', category: 'backup' },
+      { id: 'r-corrupt', text: 'Recover from data corruption or a bad release', category: 'failure' },
+      { id: 'r-observe', text: 'Know that an instance is unhealthy before customers report it', category: 'monitoring' },
+    ],
+    constraints: [
+      'The licensed component rules out App Service and Container Apps.',
+      'Promotions are announced 48 hours in advance but traffic shape is unpredictable.',
+      'The business has agreed an RTO of one hour and an RPO of 15 minutes for regional failure.',
+    ],
+    decisions: [
+      {
+        id: 'd-compute',
+        lens: 'service',
+        question: 'What hosts the web tier?',
+        requirementIds: ['r-os', 'r-scale'],
+        options: [
+          { id: 'o1', label: 'A Virtual Machine Scale Set in Flexible orchestration mode, spread across three zones', score: 2, feedback: 'Correct. It keeps the OS control the licence requires while adding autoscale and zone spreading as managed capabilities.', detail: 'IaaS, managed as a set' },
+          { id: 'o2', label: 'Three individual VMs, one per zone', score: 1, feedback: 'It satisfies the zone requirement but gives you no autoscale — the five-fold promotion peak becomes a manual operation.', detail: 'IaaS, manual' },
+          { id: 'o3', label: 'App Service on Premium v3', score: 0, feedback: 'The licensed component needs OS-level installation, which App Service does not provide.', detail: 'PaaS' },
+          { id: 'o4', label: 'A scale set in Uniform orchestration mode', score: 1, feedback: 'Workable, but Flexible is the recommended default and gives per-instance control and easier zone and fault-domain spreading. The mode cannot be changed later.', detail: 'IaaS, legacy mode' },
+        ],
+      },
+      {
+        id: 'd-frontend',
+        lens: 'network',
+        question: 'What sits in front of the instances?',
+        requirementIds: ['r-zone', 'r-observe'],
+        options: [
+          { id: 'o1', label: 'A Standard load balancer with a zone-redundant frontend and an HTTP health probe', score: 2, feedback: 'Correct. Standard is zone-redundant and has an SLA; the health probe is what removes an unhealthy instance from rotation automatically.', detail: 'Zone-redundant L4' },
+          { id: 'o2', label: 'A Basic load balancer', score: 0, feedback: 'Basic is not zone-redundant and has no SLA — it becomes the single point of failure the design is trying to remove.', detail: 'No SLA' },
+          { id: 'o3', label: 'A public IP on each instance and round-robin DNS', score: 0, feedback: 'DNS caching means clients keep using a failed instance for as long as the TTL allows. There is no health awareness at all.', detail: 'No health awareness' },
+          { id: 'o4', label: 'An Application Gateway with a WAF', score: 1, feedback: 'A strong choice for a public web application and it adds layer 7 features — but it is a bigger change than the requirements ask for, and the exam’s load balancing answer here is the Standard load balancer.', detail: 'L7 + WAF' },
+        ],
+      },
+      {
+        id: 'd-probe',
+        lens: 'monitoring',
+        question: 'How should the health probe be configured?',
+        requirementIds: ['r-observe'],
+        options: [
+          { id: 'o1', label: 'An HTTP probe on a dedicated /health path that returns 200 only when dependencies are reachable', score: 2, feedback: 'Correct. It tests the thing customers care about, and it must be excluded from authentication and redirects or it will report 302 and fail.', detail: 'Application-aware' },
+          { id: 'o2', label: 'A TCP probe on port 80', score: 1, feedback: 'It confirms something is listening, which is weaker — an application returning 500 to every request still passes.', detail: 'Port-level' },
+          { id: 'o3', label: 'An HTTP probe on the site root', score: 1, feedback: 'Better than TCP, but the root is often heavy and may redirect, which counts as a probe failure.', detail: 'Coarse' },
+          { id: 'o4', label: 'No probe — the load balancer detects failures automatically', score: 0, feedback: 'It does not. Without a probe there is nothing to tell the load balancer an instance is unhealthy.', detail: 'Incorrect' },
+        ],
+      },
+      {
+        id: 'd-scale',
+        lens: 'goal',
+        question: 'How do you handle the promotion peak?',
+        requirementIds: ['r-scale'],
+        options: [
+          { id: 'o1', label: 'Autoscale rules with a wide threshold gap and a cool-down, plus a scheduled minimum raise before each promotion', score: 2, feedback: 'Correct. The schedule absorbs the announced spike without a cold start, and the metric rules handle whatever the actual shape turns out to be.', detail: 'Schedule + metric' },
+          { id: 'o2', label: 'Metric-based autoscale only', score: 1, feedback: 'It works, but a five-fold spike arrives faster than the scale-out steps can follow, so the first minutes are degraded.', detail: 'Reactive only' },
+          { id: 'o3', label: 'Scale out manually before each promotion', score: 1, feedback: 'Reliable if someone remembers. It has no answer for unexpected traffic and no automatic scale-in afterwards.', detail: 'Manual' },
+          { id: 'o4', label: 'Scale-out at 70% CPU and scale-in at 65%', score: 0, feedback: 'The thresholds are five points apart, so the set will flap: removing an instance immediately pushes the average back over 70.', detail: 'Flapping' },
+        ],
+      },
+      {
+        id: 'd-dr',
+        lens: 'backup',
+        question: 'How do you meet a one-hour RTO for regional failure?',
+        requirementIds: ['r-region'],
+        options: [
+          { id: 'o1', label: 'Azure Site Recovery replication to a second region, with a recovery plan and regular test failovers', score: 2, feedback: 'Correct. Continuous replication meets the 15-minute RPO, and a rehearsed recovery plan is what makes a one-hour RTO believable.', detail: 'Replication' },
+          { id: 'o2', label: 'Cross Region Restore from Azure Backup', score: 1, feedback: 'It would eventually restore the workload, but a vault-tier restore of a whole web tier is measured in hours, not one.', detail: 'Restore' },
+          { id: 'o3', label: 'Geo-redundant storage on the VM disks', score: 0, feedback: 'Managed disks are not geo-redundant, and storage redundancy would not bring the compute tier back in another region anyway.', detail: 'Wrong layer' },
+          { id: 'o4', label: 'Rebuild from templates during the incident', score: 1, feedback: 'Cheap, and only credible if the templates are current and the rebuild has been timed. Most teams discover it takes longer than an hour.', detail: 'Redeploy' },
+        ],
+      },
+      {
+        id: 'd-corrupt',
+        lens: 'failure',
+        question: 'Site Recovery is in place. Do you still need backups?',
+        requirementIds: ['r-corrupt'],
+        options: [
+          { id: 'o1', label: 'Yes — Azure Backup as well, because replication copies corruption and deletion faithfully', score: 2, feedback: 'Correct. Replication protects against losing the location; only backup keeps history you can go back to.', detail: 'Both' },
+          { id: 'o2', label: 'No — the replicated copy is a second copy of the data', score: 0, feedback: 'It is a current copy. A bad release or ransomware reaches the secondary region within minutes.', detail: 'Misconception' },
+          { id: 'o3', label: 'No — the scale set can be rebuilt from its image', score: 1, feedback: 'True for the web tier, which is stateless. It says nothing about the catalogue data.', detail: 'Stateless tier only' },
+          { id: 'o4', label: 'Yes — but only in the secondary region', score: 0, feedback: 'Backups belong where the workload runs; the vault’s own redundancy handles regional protection.', detail: 'Wrong placement' },
+        ],
+      },
+    ],
+    solution: {
+      summary:
+        'A Flexible-mode scale set across three availability zones behind a zone-redundant Standard load balancer with an application-aware health probe, autoscaled by schedule and metric, replicated to a second region with Site Recovery, and backed up with Azure Backup for corruption recovery.',
+      diagram: {
+        root: {
+          type: 'group',
+          id: 'all',
+          label: 'Coastal Retail catalogue',
+          kind: 'plain',
+          direction: 'col',
+          children: [
+            {
+              type: 'group',
+              id: 'primary',
+              label: 'West Europe (primary)',
+              kind: 'region',
+              concept: 'region',
+              direction: 'col',
+              children: [
+                { type: 'node', id: 'lb', label: 'lb-catalogue', sub: 'Standard · zone-redundant', icon: 'lb', tone: 'accent', concept: 'load-balancer' },
+                {
+                  type: 'group',
+                  id: 'vmss',
+                  label: 'vmss-web (Flexible)',
+                  kind: 'boundary',
+                  concept: 'vmss',
+                  direction: 'row',
+                  children: [
+                    { type: 'node', id: 'z1', label: 'Zone 1', icon: 'zone', concept: 'availability-zone' },
+                    { type: 'node', id: 'z2', label: 'Zone 2', icon: 'zone', concept: 'availability-zone' },
+                    { type: 'node', id: 'z3', label: 'Zone 3', icon: 'zone', concept: 'availability-zone' },
+                  ],
+                },
+                { type: 'node', id: 'autoscale', label: 'Autoscale', sub: 'schedule + CPU', icon: 'vmss', concept: 'autoscale' },
+                { type: 'node', id: 'rsv', label: 'Recovery Services vault', icon: 'backup', concept: 'recovery-services-vault' },
+              ],
+            },
+            {
+              type: 'group',
+              id: 'secondary',
+              label: 'North Europe (recovery)',
+              kind: 'region',
+              concept: 'paired-region',
+              direction: 'col',
+              children: [{ type: 'node', id: 'asr', label: 'Replicated instances', sub: 'not running until failover', icon: 'recovery', tone: 'muted', concept: 'site-recovery' }],
+            },
+          ],
+        },
+        edges: [
+          { from: 'lb', to: 'vmss', label: 'probe + traffic', tone: 'allow' },
+          { from: 'autoscale', to: 'vmss', label: 'adjusts capacity', style: 'dashed', tone: 'muted' },
+          { from: 'vmss', to: 'rsv', label: 'daily backup', style: 'dashed', tone: 'data' },
+          { from: 'vmss', to: 'asr', label: 'continuous replication', tone: 'data' },
+        ],
+        flows: [{ id: 'customer', label: 'Customer request', path: ['lb', 'vmss', 'z1'], tone: 'data' }],
+      },
+      rationale: [
+        { decision: 'Flexible-mode scale set across zones', why: 'Keeps the OS control the licence requires while making zone spreading and autoscale properties of the platform rather than of a runbook. The mode cannot be changed later, so it must be right at creation.' },
+        { decision: 'Standard load balancer, zone-redundant', why: 'A Basic load balancer would reintroduce the single point of failure the zones exist to remove.' },
+        { decision: 'Application-aware health probe', why: 'The probe defines what "healthy" means. A TCP probe would keep sending traffic to an instance returning errors.' },
+        { decision: 'Scheduled minimum plus metric rules', why: 'Promotions are announced, so the schedule removes the cold-start gap; the metric rules still cover the unpredictable shape.' },
+        { decision: 'Site Recovery for the region, Azure Backup for corruption', why: 'Different failure modes. Replication copies a bad release within minutes; only backups give you a point before it.' },
+      ],
+      alternatives: [
+        { option: 'Application Gateway with WAF instead of a load balancer', whenBetter: 'When the public site needs layer 7 routing, TLS offload and web application firewall protection — common for customer-facing retail.' },
+        { option: 'Active-active across two regions with Front Door', whenBetter: 'When the RTO is minutes rather than an hour and the data tier can support multi-region writes. Substantially more expensive and more complex.' },
+        { option: 'Availability set instead of zones', whenBetter: 'Only in a region without availability zones — it protects against rack and maintenance failures but not against losing the datacentre.' },
+      ],
+    },
+    concepts: ['vmss', 'availability-zone', 'autoscale', 'load-balancer', 'health-probe', 'site-recovery', 'azure-backup', 'recovery-services-vault'],
+    sources: ['vmss-modes', 'availability-zones', 'lb-skus', 'lb-probes', 'asr-architecture', 'rsv-overview'],
+  },
+];
