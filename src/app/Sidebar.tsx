@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router';
+import { CreatorCard } from '@/components/brand/CreatorCredit';
 import { Search } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Logo } from '@/components/brand/Logo';
@@ -99,6 +100,7 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           </div>
           <ProgressBar value={completed / LESSONS.length} size="sm" label="Course progress" />
         </div>
+        <CreatorCard />
       </div>
     </div>
   );

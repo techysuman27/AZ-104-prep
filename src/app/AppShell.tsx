@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react';
+import { CreatorFooter } from '@/components/brand/CreatorCredit';
 import { Link, Outlet, ScrollRestoration, useLocation, useNavigation } from 'react-router';
 import { Menu, Search } from 'lucide-react';
 import { Dialog as RDialog } from 'radix-ui';
@@ -91,6 +92,7 @@ export function AppShell() {
         <main id="main" tabIndex={-1} className="focus:outline-none">
           <Outlet />
         </main>
+        <CreatorFooter />
       </div>
 
       <Suspense fallback={null}>
